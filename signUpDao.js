@@ -26,6 +26,12 @@ const usersOtpTableSchema = {
     sortKeyName: "dateTime"
 
 }
+
+const usersTablePhoneIndexSchema = {
+    tableName: "users_ph",
+    partitionKeyName: "phoneNumber",
+    indexName: "phoneNumber-index"
+}
 const origin = "db";
 
 /** 
@@ -109,15 +115,24 @@ class SignupDao extends Dao {
         return peGet
     }
 
-
-    prepareErrorParams(username, error, dateTime, type) {
+    prepareErrorParams(username, dateTime, event, customError, awsError) {
         let pePut = new ParamExpressionPut();
         pePut.tableName = usersErrorTableSchema.tableName;
-        pePut.payload = {
-            [usersErrorTableSchema.partitionKeyName]: username,
-            error: error,
-            [usersErrorTableSchema.sortKeyName]: dateTime,
-            type: type
+        if (awsError) {
+            pePut.payload = {
+                [usersErrorTableSchema.partitionKeyName]: username,
+                [usersErrorTableSchema.sortKeyName]: dateTime,
+                payload: event.payload,
+                customError: customError,
+                awsError: awsError
+            }
+        } else {
+            pePut.payload = {
+                [usersErrorTableSchema.partitionKeyName]: username,
+                [usersErrorTableSchema.sortKeyName]: dateTime,
+                payload: event.payload,
+                customError: customError
+            }
         }
         return pePut;
     }
@@ -219,6 +234,24 @@ class SignupDao extends Dao {
         }
         peUpdate.updateExpression = "SET phoneCodeVerifyInvalidAttemptCount=:phoneCodeVerifyInvalidAttemptCountValue";
         return peUpdate;
+    }
+
+    prepareParamsToQueryUserPhoneNumber(phoneNumber) {
+        let peQuery = new ParamExpressionsQuery();
+        peQuery.tableName = usersTablePhoneIndexSchema.tableName;
+        peQuery.indexName = usersTablePhoneIndexSchema.indexName;
+        peQuery.keyConditionExpression = `#partitionKey = :partitionkeyValue`;
+        peQuery.projectionExpression = "phoneVerified"
+        peQuery.filterExpression = '#filterType = :typeValue'
+        peQuery.expressionAttributeNames = {
+            "#partitionKey": `${[usersTablePhoneIndexSchema.partitionKeyName]}`,
+            "#filterType": "phoneVerified"
+        };
+        peQuery.expressionAttributeValues = {
+            ":partitionkeyValue": phoneNumber,
+            ":typeValue": true
+        };
+        return peQuery;
     }
 
 
