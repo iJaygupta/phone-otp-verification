@@ -29,7 +29,6 @@ const handleExceptions = async (exception, event, customException) => {
         }
     }
     else {
-        console.log(JSON.stringify(exception));
         errorObj = {
             statusCode: 500
         }

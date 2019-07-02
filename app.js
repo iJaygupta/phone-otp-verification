@@ -6,7 +6,9 @@ const { challengeObj, } = require("./responseCodes")
 let moment = require('moment');
 const SNS = new AWS.SNS();
 let { getParametersMap } = require('./paramLoader');
-var { errorsCustomObj } = require("./errors")
+var { errorsCustomObj } = require("./errors");
+var log4js = require('log4js');
+var logger = log4js.getLogger();
 AWS.config.update({
     region: 'ap-southeast-1'
 });
@@ -21,18 +23,20 @@ let loadEnvValues;
 let isExceptionExempted;
 
 
+
 exports.handler = async (event) => {
     let requestDetails = {};
-    requestDetails = Object.assign({}, event.body);
-    requestDetails.payload = {};
+    requestDetails = JSON.parse(JSON.stringify(event.body));
+    requestDetails.payload = requestDetails.payload ? requestDetails.payload : {};
     requestDetails.payload.username = event.user_info.email;
-
     if (!loadEnvValues) {
         try {
             await loadSSMFunction()
+            logger.level = loadEnvValues.get("ph_loggerLevel");
         } catch (err) {
-            const body = 'Error loading configuration.'
-            throw new Error(createResponse(400, body, 'string'));
+            logger.fatal('Loading SSM Failed ', err);
+            let errorRes = errorsCustomObj["LoadSSMFailedException"];
+            throw new Error(createResponse(errorRes.statusCode, errorRes.errorCode, 'string'))
         }
     };
 
@@ -44,7 +48,6 @@ exports.handler = async (event) => {
                 result = await sendPhoneCodeFunction(requestDetails);
                 break;
             case 'verifyPhone':
-                console.log(event.body)
                 await validator(verifyPhoneActionDetails(), event.body);
                 result = await verifyPhoneFunction(requestDetails);
                 break;
@@ -53,12 +56,17 @@ exports.handler = async (event) => {
                 result = await changePhoneFunction(requestDetails);
                 break;
             default:
-                errObj = errorsCustomObj["ActionNotSupported"]
-                throw JSON.stringify(errObj);
+                let errObj = errorsCustomObj["ActionNotSupported"]
+                throw new Error(createResponse(errObj.statusCode, errObj.errorCode, 'string'));
+
 
         }
         return result;
     } catch (error) {
+        logger.fatal('Error Occured in Processing Action ', error);
+        if (error.origin == "joi") {
+            throw new Error(createResponse(error.statusCode, error.errorCode, 'string'));
+        }
         throw error;
     }
 
@@ -69,7 +77,7 @@ Loads userpool and client id from parameter store.
 */
 let loadSSMFunction = async () => {
     if (loadEnvValues === undefined) {
-        const keyArray = '{"Keys":["ph_customer_clientId","ph_customer_userpoolId","ph_dateTimeFormat","ph_phoneCodeSendAllowed","ph_phoneCodeVerifyAllowed","ph_phoneCodeValidTimeLimit","ph_phoneCodeValidTimeFormat","ph_phoneCodeVerifyBlockTimeLimit","ph_phoneCodeSendBlockTimeLimit","ph_phoneChangeAllowed"]}';
+        const keyArray = '{"Keys":["ph_customer_clientId","ph_customer_userpoolId","ph_dateTimeFormat","ph_phoneCodeSendAllowed","ph_phoneCodeVerifyAllowed","ph_phoneCodeValidTimeLimit","ph_phoneCodeValidTimeFormat","ph_phoneCodeVerifyBlockTimeLimit","ph_phoneCodeSendBlockTimeLimit","ph_phoneChangeAllowed","ph_loggerLevel"]}';
         try {
             loadEnvValues = await getParametersMap(keyArray)
             return true;
@@ -83,10 +91,10 @@ let loadSSMFunction = async () => {
 /*
 creates response object
 */
-const createResponse = (statusCode, body, type) => {
+const createResponse = (statusCode, errorCode, type) => {
     const resp = {
         statusCode,
-        body: body
+        errorCode: errorCode
     }
     if (type && type === 'string') {
         return JSON.stringify(resp);
@@ -105,12 +113,12 @@ const sendPhoneCodeFunction = async (requestDetails) => {
             await handleExceptions("", requestDetails, "UserNotFoundExceptionInDb");
         }
         else if (!userDetails.emailVerified) {
-            const responseObj = challengeObj["resendEmail"]
-            return createResponse(200, responseObj);
+            const responseObj = challengeObj["verifyEmail"]
+            return responseObj;
         }
         else if (userDetails.phoneVerified) {
             const responseObj = challengeObj["login"]
-            return createResponse(200, responseObj);
+            return responseObj;
         }
 
         let isUserAllowed = await phoneCodeSendAllowedFunction(userDetails);
@@ -123,7 +131,7 @@ const sendPhoneCodeFunction = async (requestDetails) => {
         await SignupDao.putDataIntoDb(SignupDao.prepareParamToPutUserOTPDetail(userDetails.id, phoneCodeSendDateTime, otp, "signup_phone_verify"));
         await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateUserOTP(userDetails, phoneCodeSendDateTime, loadEnvValues.get("ph_phoneCodeSendAllowed")));
         const responseObj = challengeObj["verifyPhone"]
-        return createResponse(200, responseObj);
+        return responseObj;
     } catch (err) {
         if (isExceptionExempted)
             throw err;
@@ -170,7 +178,7 @@ const sendSMS = async (phoneNumber, otp) => {
     return new Promise((resolve, reject) => {
         SNS.publish(params, (err, data) => {
             if (err) {
-                // console.error("SNS Error :", err);
+                logger.fatal('Error Occured While Sending SMS', err);
                 err.origin = "sns"
                 reject(err);
             } else {
@@ -207,7 +215,7 @@ const verifyPhoneFunction = async (requestDetails) => {
         }
         else if (userDetails.phoneVerified) {
             const responseObj = challengeObj["login"]
-            return createResponse(200, responseObj);
+            return responseObj;
         }
         let isUserAllowed = await phoneCodeVerifyAllowedFunction(userDetails);
         let phoneCodeVerifyDateTime = moment(new Date()).format(loadEnvValues.get("ph_dateTimeFormat"));
@@ -226,9 +234,9 @@ const verifyPhoneFunction = async (requestDetails) => {
         userOTP = userOTP[userOTP.length - 1] || ""
         if (userOTP.code === requestDetails.payload.code) {
             await updatePhoneInCognito("verifyPhone", requestDetails);
-            await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateVerifyPhone(requestDetails.payload.username));
+            await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateVerifyPhone(requestDetails.payload.username, phoneCodeVerifyDateTime));
             const responseObj = challengeObj["login"]
-            return createResponse(200, responseObj);
+            return responseObj;
 
         } else {
             await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateUserOTPVerify(userDetails, phoneCodeVerifyDateTime, loadEnvValues.get("ph_phoneCodeVerifyAllowed")));
@@ -249,7 +257,8 @@ const phoneCodeVerifyAllowedFunction = async (userDetails) => {
         if (phoneCodeVerifyInvalidAttemptCount >= loadEnvValues.get("ph_phoneCodeVerifyAllowed")) {
             let timeDiff = calculateTimeDiff(lastPhoneCodeVerifyInvalidAttemptDateTime);// calculating time gap between last phone code requested time and current time
             if (timeDiff > loadEnvValues.get("ph_phoneCodeVerifyBlockTimeLimit")) { // check if the time gap is more than blocking time   
-                await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUnblockUserPhoneVerify(userDetails.id));
+                let phoneCodeVerifyDateTime = moment(new Date()).format(loadEnvValues.get("ph_dateTimeFormat"));
+                await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUnblockUserPhoneVerify(userDetails.id, phoneCodeVerifyDateTime));
                 return true;
             } else {
                 return false; // user not allowed and still blocked
@@ -268,7 +277,7 @@ const updatePhoneInCognito = async (phoneAction, requestDetails) => {
     return new Promise((resolve, reject) => {
         cisp.adminUpdateUserAttributes(params, function (err, data) {
             if (err) {
-                // console.error("Error While Updating Phone in Cognito :", err);
+                logger.fatal('Error Occured While Updating Phone in Cognito ', err);
                 err.origin = "cognito";
                 reject(err);
             } else {
@@ -318,7 +327,7 @@ const changePhoneFunction = async (requestDetails) => {
         }
         else if (!userDetails.emailVerified) {
             const responseObj = challengeObj["resendEmail"]
-            return createResponse(200, responseObj);
+            return responseObj;
         }
         else if (userDetails.phoneVerified) {
             isExceptionExempted = true;
@@ -339,7 +348,7 @@ const changePhoneFunction = async (requestDetails) => {
         await updatePhoneInCognito("changePhone", requestDetails);
         await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateChangePhone(requestDetails.payload.username, requestDetails.payload.phoneNumber, userDetails, phoneChangeDateTime));
         const responseObj = challengeObj["sendPhoneCode"]
-        return createResponse(200, responseObj);
+        return responseObj;
     } catch (err) {
         if (isExceptionExempted)
             throw err;
@@ -371,20 +380,18 @@ const phoneAlreadyExistCheckFunction = async (phoneNumber) => {
 
 
 
+
+
 let json = {
     body: {
-        "action": "verifyPhone",
-        payload: {
-            code: "8737286"
-        }
+        "action": "verifyPhone"
     },
     user_info: {
-        email: "jay.hupta@creditculture.sg"
+        email: "jay.gupta@creditculture.sg"
     }
 }
 
 exports.handler(json).then((data) => {
     console.log(data);
 })
-
 

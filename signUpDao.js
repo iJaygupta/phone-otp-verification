@@ -123,7 +123,7 @@ class SignupDao extends Dao {
                 [usersErrorTableSchema.partitionKeyName]: username,
                 [usersErrorTableSchema.sortKeyName]: dateTime,
                 payload: event.payload,
-                customError: customError,
+                errorResponse: customError,
                 awsError: awsError
             }
         } else {
@@ -131,7 +131,7 @@ class SignupDao extends Dao {
                 [usersErrorTableSchema.partitionKeyName]: username,
                 [usersErrorTableSchema.sortKeyName]: dateTime,
                 payload: event.payload,
-                customError: customError
+                errorResponse: customError
             }
         }
         return pePut;
@@ -159,7 +159,6 @@ class SignupDao extends Dao {
 
 
     prepareParamToUpdateUserOTP(userDetails, phoneCodeSendDateTime, phoneCodeSendAllowed) {
-        console.log("phoneCodeSendAllowed", phoneCodeSendAllowed)
         let peUpdate = new ParamExpressionUpdate();
         peUpdate.tableName = usersTableSchema.tableName;
         peUpdate.partitionKey = usersTableSchema.partitionKeyName;
@@ -167,9 +166,11 @@ class SignupDao extends Dao {
         peUpdate.expressionAttributeValues = {
             ":phoneVerifyCodeSentValue": userDetails.phoneVerifyCodeSentCount ? userDetails.phoneVerifyCodeSentCount >= phoneCodeSendAllowed ? 1 : userDetails.phoneVerifyCodeSentCount + 1 : 1,
             ":lastPhoneVerifyCodeSentDateTimeValue": phoneCodeSendDateTime,
-            ":totalPhoneVerifyCodeSentValue": userDetails.totalPhoneVerifyCodeSentCount ? userDetails.totalPhoneVerifyCodeSentCount + 1 : 1
+            ":totalPhoneVerifyCodeSentValue": userDetails.totalPhoneVerifyCodeSentCount ? userDetails.totalPhoneVerifyCodeSentCount + 1 : 1,
+            ":lastUpdatedTimeValue": phoneCodeSendDateTime,
+            ":lastUpdatedByValue": userDetails.id
         }
-        peUpdate.updateExpression = "SET phoneVerifyCodeSentCount=:phoneVerifyCodeSentValue , lastPhoneVerifyCodeSentDateTime=:lastPhoneVerifyCodeSentDateTimeValue ,totalPhoneVerifyCodeSentCount=:totalPhoneVerifyCodeSentValue";
+        peUpdate.updateExpression = "SET phoneVerifyCodeSentCount=:phoneVerifyCodeSentValue , lastPhoneVerifyCodeSentDateTime=:lastPhoneVerifyCodeSentDateTimeValue ,totalPhoneVerifyCodeSentCount=:totalPhoneVerifyCodeSentValue ,lastUpdatedTime=:lastUpdatedTimeValue ,lastUpdatedBy=:lastUpdatedByValue";
         return peUpdate;
     }
 
@@ -186,15 +187,17 @@ class SignupDao extends Dao {
         return pePut;
     }
 
-    prepareParamToUpdateVerifyPhone(username) {
+    prepareParamToUpdateVerifyPhone(username, phoneCodeVerifyDateTime) {
         let peUpdate = new ParamExpressionUpdate();
         peUpdate.tableName = usersTableSchema.tableName;
         peUpdate.partitionKey = usersTableSchema.partitionKeyName;
         peUpdate.partitionKeyValue = username;
         peUpdate.expressionAttributeValues = {
-            ":phoneVerifiedValue": true
+            ":phoneVerifiedValue": true,
+            ":lastUpdatedTimeValue": phoneCodeVerifyDateTime,
+            ":lastUpdatedByValue": username
         }
-        peUpdate.updateExpression = `SET phoneVerified=:phoneVerifiedValue`;
+        peUpdate.updateExpression = `SET phoneVerified=:phoneVerifiedValue ,lastUpdatedTime=:lastUpdatedTimeValue ,lastUpdatedByValue=:lastUpdatedByValue`;
         return peUpdate;
     }
     prepareParamToUpdateChangePhone(username, newPhone, userDetails, phoneChangeDateTime) {
@@ -206,9 +209,11 @@ class SignupDao extends Dao {
             ":phoneNumberValue": newPhone,
             ":phoneVerifiedValue": false,
             ":phoneChangeCountValue": userDetails.phoneChangeCount ? userDetails.phoneChangeCount + 1 : 1,
-            ":phoneChangeDateTimeValue": phoneChangeDateTime
+            ":phoneChangeDateTimeValue": phoneChangeDateTime,
+            ":lastUpdatedTimeValue": phoneChangeDateTime,
+            ":lastUpdatedByValue": username
         }
-        peUpdate.updateExpression = "SET phoneNumber=:phoneNumberValue ,phoneVerified=:phoneVerifiedValue, phoneChangeCount=:phoneChangeCountValue ,phoneChangeDateTime=:phoneChangeDateTimeValue";
+        peUpdate.updateExpression = "SET phoneNumber=:phoneNumberValue ,phoneVerified=:phoneVerifiedValue, phoneChangeCount=:phoneChangeCountValue ,phoneChangeDateTime=:phoneChangeDateTimeValue ,lastUpdatedTime=:lastUpdatedTimeValue ,lastUpdatedByValue=:lastUpdatedByValue";
         return peUpdate;
     }
     prepareParamToUpdateUserOTPVerify(userDetails, phoneCodeVerifyDateTime, phoneCodeVerifyAllowed) {
@@ -219,20 +224,24 @@ class SignupDao extends Dao {
         peUpdate.expressionAttributeValues = {
             ":phoneCodeVerifyInvalidAttemptCountValue": userDetails.phoneCodeVerifyInvalidAttemptCount ? userDetails.phoneCodeVerifyInvalidAttemptCount >= phoneCodeVerifyAllowed ? 1 : userDetails.phoneCodeVerifyInvalidAttemptCount + 1 : 1,
             ":lastPhoneCodeVerifyInvalidAttemptDateTimeValue": phoneCodeVerifyDateTime,
-            ":totalPhoneCodeVerifyInvalidAttemptCountValue": userDetails.totalPhoneCodeVerifyInvalidAttemptCount ? userDetails.totalPhoneCodeVerifyInvalidAttemptCount + 1 : 1
+            ":totalPhoneCodeVerifyInvalidAttemptCountValue": userDetails.totalPhoneCodeVerifyInvalidAttemptCount ? userDetails.totalPhoneCodeVerifyInvalidAttemptCount + 1 : 1,
+            ":lastUpdatedTimeValue": phoneCodeVerifyDateTime,
+            ":lastUpdatedByValue": userDetails.id
         }
-        peUpdate.updateExpression = "SET phoneCodeVerifyInvalidAttemptCount=:phoneCodeVerifyInvalidAttemptCountValue , lastPhoneCodeVerifyInvalidAttemptDateTime=:lastPhoneCodeVerifyInvalidAttemptDateTimeValue ,totalPhoneCodeVerifyInvalidAttemptCount=:totalPhoneCodeVerifyInvalidAttemptCountValue";
+        peUpdate.updateExpression = "SET phoneCodeVerifyInvalidAttemptCount=:phoneCodeVerifyInvalidAttemptCountValue , lastPhoneCodeVerifyInvalidAttemptDateTime=:lastPhoneCodeVerifyInvalidAttemptDateTimeValue ,totalPhoneCodeVerifyInvalidAttemptCount=:totalPhoneCodeVerifyInvalidAttemptCountValue,lastUpdatedTime=:lastUpdatedTimeValue ,lastUpdatedByValue=:lastUpdatedByValue";
         return peUpdate;
     }
-    prepareParamToUnblockUserPhoneVerify(username) {
+    prepareParamToUnblockUserPhoneVerify(username, phoneCodeVerifyDateTime) {
         let peUpdate = new ParamExpressionUpdate();
         peUpdate.tableName = usersTableSchema.tableName;
         peUpdate.partitionKey = usersTableSchema.partitionKeyName;
         peUpdate.partitionKeyValue = username;
         peUpdate.expressionAttributeValues = {
-            ":phoneCodeVerifyInvalidAttemptCountValue": 0
+            ":phoneCodeVerifyInvalidAttemptCountValue": 0,
+            ":lastUpdatedTimeValue": phoneCodeVerifyDateTime,
+            ":lastUpdatedByValue": username
         }
-        peUpdate.updateExpression = "SET phoneCodeVerifyInvalidAttemptCount=:phoneCodeVerifyInvalidAttemptCountValue";
+        peUpdate.updateExpression = "SET phoneCodeVerifyInvalidAttemptCount=:phoneCodeVerifyInvalidAttemptCountValue ,lastUpdatedTime=:lastUpdatedTimeValue ,lastUpdatedByValue=:lastUpdatedByValue";
         return peUpdate;
     }
 
@@ -245,7 +254,8 @@ class SignupDao extends Dao {
         peQuery.filterExpression = '#filterType = :typeValue'
         peQuery.expressionAttributeNames = {
             "#partitionKey": `${[usersTablePhoneIndexSchema.partitionKeyName]}`,
-            "#filterType": "phoneVerified"
+            "#filterType": "phoneVerified",
+
         };
         peQuery.expressionAttributeValues = {
             ":partitionkeyValue": phoneNumber,
