@@ -8,6 +8,8 @@ const AWS = require("aws-sdk");
 AWS.config.update({ region: "ap-southeast-1" });
 let moment = require('moment');
 const docClient = new AWS.DynamoDB.DocumentClient();
+const cryptoRandomString = require('crypto-random-string');
+const uuidv1 = require('uuid/v1');
 const usersErrorTableSchema = {
     tableName: "ph_users_error",
     partitionKeyName: "id",
@@ -31,6 +33,13 @@ const usersTablePhoneIndexSchema = {
     tableName: "users_ph",
     partitionKeyName: "phoneNumber",
     indexName: "phoneNumber-index"
+}
+
+const sessionTableSchema = {
+    tableName: "users_sessions_ph",
+    partitionKeyName: "id",
+    sortKeyName: "sessionId"
+
 }
 const origin = "db";
 
@@ -175,14 +184,15 @@ class SignupDao extends Dao {
     }
 
 
-    prepareParamToPutUserOTPDetail(username, dateTime, otp, type) {
+    prepareParamToPutUserOTPDetail(username, dateTime, otp, type, phoneNumber) {
         let pePut = new ParamExpressionPut();
         pePut.tableName = usersOtpTableSchema.tableName;
         pePut.payload = {
             [usersOtpTableSchema.partitionKeyName]: username,
             [usersOtpTableSchema.sortKeyName]: dateTime,
             type: type,
-            code: otp
+            code: otp,
+            phoneNumber: phoneNumber
         }
         return pePut;
     }
@@ -264,6 +274,53 @@ class SignupDao extends Dao {
         return peQuery;
     }
 
+
+    putUserSession(username, rememberflag, sessionStartTime, sessionEndTime) {
+        let pePut = new ParamExpressionPut()
+        pePut.tableName = sessionTableSchema.tableName
+        if (rememberflag) {
+            pePut.payload = {
+                [sessionTableSchema.partitionKeyName]: username,
+                [sessionTableSchema.sortKeyName]: this.generateSessionId(),
+                deviceId: this.generateDeviceKey(),
+                deviceSecret: this.generateDeviceSecret(),
+                mfaVerified: true,
+                lastUpdatedTime: sessionStartTime,
+                lastUpdatedBy: username,
+                sessionStartTime: sessionStartTime,
+                sessionEndTime: sessionEndTime
+
+            }
+        } else {
+            pePut.payload = {
+                [sessionTableSchema.partitionKeyName]: username,
+                [sessionTableSchema.sortKeyName]: this.generateSessionId(),
+                mfaVerified: true,
+                lastUpdatedTime: sessionStartTime,
+                lastUpdatedBy: username,
+                sessionStartTime: sessionStartTime,
+                sessionEndTime: sessionEndTime
+
+            }
+
+        }
+        return pePut
+    }
+    getDateTime(dateTimeFormat) {
+        return moment(new Date()).format(dateTimeFormat);
+    }
+    generateDeviceKey() {
+        return uuidv1()
+    }
+
+    generateDeviceSecret() {
+        return cryptoRandomString({ length: 256 })
+    }
+    generateSessionId() {
+        let uuid = uuidv1()
+        const sessionId = "SID" + uuid + Math.floor(Math.random() * (9999999 - 1000000) + 1000000)
+        return sessionId.replace(/[-]/g, "")
+    }
 
 
 }

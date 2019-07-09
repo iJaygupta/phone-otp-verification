@@ -12,6 +12,7 @@ var logger = log4js.getLogger();
 AWS.config.update({
     region: 'ap-southeast-1'
 });
+
 const { sendPhoneCodeActionDetails, verifyPhoneActionDetails, changePhoneActionDetails } = require("./PhoneActionsSchema");
 
 const { validator } = require("./Validator");
@@ -77,7 +78,7 @@ Loads userpool and client id from parameter store.
 */
 let loadSSMFunction = async () => {
     if (loadEnvValues === undefined) {
-        const keyArray = '{"Keys":["ph_customer_clientId","ph_customer_userpoolId","ph_dateTimeFormat","ph_phoneCodeSendAllowed","ph_phoneCodeVerifyAllowed","ph_phoneCodeValidTimeLimit","ph_phoneCodeValidTimeFormat","ph_phoneCodeVerifyBlockTimeLimit","ph_phoneCodeSendBlockTimeLimit","ph_phoneChangeAllowed","ph_loggerLevel"]}';
+        const keyArray = '{"Keys":["ph_customer_clientId","ph_customer_userpoolId","ph_dateTimeFormat","ph_phoneCodeSendAllowed","ph_phoneCodeVerifyAllowed","ph_phoneCodeValidTimeLimit","ph_phoneCodeValidTimeFormat","ph_phoneCodeVerifyBlockTimeLimit","ph_phoneCodeSendBlockTimeLimit","ph_phoneChangeAllowed","ph_loggerLevel","ph_customer_sessionValidationTime"]}';
         try {
             loadEnvValues = await getParametersMap(keyArray)
             return true;
@@ -128,7 +129,7 @@ const sendPhoneCodeFunction = async (requestDetails) => {
         }
         let otp = generateRandomCode();
         let phoneCodeSendDateTime = await sendSMS(userDetails.phoneNumber, otp);
-        await SignupDao.putDataIntoDb(SignupDao.prepareParamToPutUserOTPDetail(userDetails.id, phoneCodeSendDateTime, otp, "signup_phone_verify"));
+        await SignupDao.putDataIntoDb(SignupDao.prepareParamToPutUserOTPDetail(userDetails.id, phoneCodeSendDateTime, otp, "signup_phone_verify", userDetails.phoneNumber));
         await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateUserOTP(userDetails, phoneCodeSendDateTime, loadEnvValues.get("ph_phoneCodeSendAllowed")));
         const responseObj = challengeObj["verifyPhone"]
         return responseObj;
@@ -235,6 +236,9 @@ const verifyPhoneFunction = async (requestDetails) => {
         if (userOTP.code === requestDetails.payload.code) {
             await updatePhoneInCognito("verifyPhone", requestDetails);
             await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateVerifyPhone(requestDetails.payload.username, phoneCodeVerifyDateTime));
+            let sessionStartTime = getDateTime(loadEnvValues.get("ph_dateTimeFormat"));
+            let sessionEndTime = addMinutesToDate(loadEnvValues.get("ph_customer_sessionValidationTime"), sessionStartTime);
+            await SignupDao.putDataIntoDb(SignupDao.putUserSession(requestDetails.payload.username, false, sessionStartTime, sessionEndTime));
             const responseObj = challengeObj["login"]
             return responseObj;
 
@@ -244,6 +248,7 @@ const verifyPhoneFunction = async (requestDetails) => {
             await handleExceptions("", requestDetails, "UserOTPIncorrect");
         }
     } catch (err) {
+        console.log(err);
         if (isExceptionExempted)
             throw err;
         else
@@ -377,14 +382,20 @@ const phoneAlreadyExistCheckFunction = async (phoneNumber) => {
 
 }
 
+const addMinutesToDate = (minutes, date) => {
+    let currentTime = moment(date, loadEnvValues.get("ph_dateTimeFormat"))
+        .add(minutes, 'minutes')
+    logger.info('15 mintues date:', currentTime)
+    return currentTime.format(loadEnvValues.get("ph_dateTimeFormat"))
+}
 
-
-
-
+const getDateTime = (dateTimeFormat) => {
+    return moment(new Date()).format(dateTimeFormat);
+}
 
 let json = {
     body: {
-        "action": "verifyPhone"
+        "action": "sendPhoneCode"
     },
     user_info: {
         email: "jay.gupta@creditculture.sg"
