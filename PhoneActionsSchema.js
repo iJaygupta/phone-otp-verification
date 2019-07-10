@@ -15,6 +15,7 @@ const verifyPhoneActionDetails = () => {
                 .required()
                 .keys({
                     code: Joi.number().required(),
+                    isRemembered: Joi.boolean(),
                 })
         })
     return schema;

@@ -238,8 +238,18 @@ const verifyPhoneFunction = async (requestDetails) => {
             await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateVerifyPhone(requestDetails.payload.username, phoneCodeVerifyDateTime));
             let sessionStartTime = getDateTime(loadEnvValues.get("ph_dateTimeFormat"));
             let sessionEndTime = addMinutesToDate(loadEnvValues.get("ph_customer_sessionValidationTime"), sessionStartTime);
-            await SignupDao.putDataIntoDb(SignupDao.putUserSession(requestDetails.payload.username, false, sessionStartTime, sessionEndTime));
-            const responseObj = challengeObj["login"]
+            let sessionDetails = SignupDao.prepareParamToPutUserSession(requestDetails.payload.username, requestDetails.payload.isRemembered, sessionStartTime, sessionEndTime)
+            await SignupDao.putDataIntoDb(sessionDetails);
+            sessionDetails = sessionDetails.payload
+            let sessionData = {
+                sessionId: sessionDetails.sessionId,
+                sessionEndTime: sessionEndTime
+            }
+            if (requestDetails.payload.isRemembered) {
+                sessionData.deviceId = sessionDetails.deviceId
+                sessionData.deviceSecret = sessionDetails.deviceSecret
+            }
+            const responseObj = createLoginResponse(200, sessionData);
             return responseObj;
 
         } else {
@@ -393,9 +403,22 @@ const getDateTime = (dateTimeFormat) => {
     return moment(new Date()).format(dateTimeFormat);
 }
 
+
+const createLoginResponse = (statusCode, sessionData) => {
+    const resp = {
+        statusCode: statusCode,
+        sessionData: sessionData
+    }
+    return resp;
+}
+
 let json = {
     body: {
-        "action": "sendPhoneCode"
+        "action": "verifyPhone",
+        "payload": {
+            code: 300985,
+            isRemembered: true
+        }
     },
     user_info: {
         email: "jay.gupta@creditculture.sg"

@@ -275,7 +275,7 @@ class SignupDao extends Dao {
     }
 
 
-    putUserSession(username, rememberflag, sessionStartTime, sessionEndTime) {
+    prepareParamToPutUserSession(username, rememberflag, sessionStartTime, sessionEndTime) {
         let pePut = new ParamExpressionPut()
         pePut.tableName = sessionTableSchema.tableName
         if (rememberflag) {
