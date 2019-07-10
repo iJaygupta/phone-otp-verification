@@ -225,33 +225,34 @@ const verifyPhoneFunction = async (requestDetails) => {
             isExceptionExempted = true;
             await handleExceptions("", requestDetails, "UserBlockedForVerifyPhone");
         }
-        let userOTP = await SignupDao.query(SignupDao.prepareParamsToGetOTP(requestDetails.payload.username, loadEnvValues.get("ph_phoneCodeValidTimeLimit"), loadEnvValues.get("ph_phoneCodeValidTimeFormat"), loadEnvValues.get("ph_dateTimeFormat")));
+        let userOTP = await SignupDao.query(SignupDao.prepareParamsToGetOTP(requestDetails.payload.username, loadEnvValues.get("ph_dateTimeFormat")));
         userOTP = userOTP.Items
-        if (userOTP.length <= 0) {
-            await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateUserOTPVerify(userDetails, phoneCodeVerifyDateTime, loadEnvValues.get("ph_phoneCodeVerifyAllowed")));
-            isExceptionExempted = true;
-            await handleExceptions("", requestDetails, "UserOTPExpired");
-        }
         userOTP = userOTP[userOTP.length - 1] || ""
         if (userOTP.code === requestDetails.payload.code) {
-            await updatePhoneInCognito("verifyPhone", requestDetails);
-            await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateVerifyPhone(requestDetails.payload.username, phoneCodeVerifyDateTime));
-            let sessionStartTime = getDateTime(loadEnvValues.get("ph_dateTimeFormat"));
-            let sessionEndTime = addMinutesToDate(loadEnvValues.get("ph_customer_sessionValidationTime"), sessionStartTime);
-            let sessionDetails = SignupDao.prepareParamToPutUserSession(requestDetails.payload.username, requestDetails.payload.isRemembered, sessionStartTime, sessionEndTime)
-            await SignupDao.putDataIntoDb(sessionDetails);
-            sessionDetails = sessionDetails.payload
-            let sessionData = {
-                sessionId: sessionDetails.sessionId,
-                sessionEndTime: sessionEndTime
+            isUserAllowed = await isPhoneCodeExpired(userOTP.dateTime);
+            if (!isUserAllowed) {
+                await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateUserOTPVerify(userDetails, phoneCodeVerifyDateTime, loadEnvValues.get("ph_phoneCodeVerifyAllowed")));
+                isExceptionExempted = true;
+                await handleExceptions("", requestDetails, "UserOTPExpired");
+            } else {
+                await updatePhoneInCognito("verifyPhone", requestDetails);
+                await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateVerifyPhone(requestDetails.payload.username, phoneCodeVerifyDateTime));
+                let sessionStartTime = getDateTime(loadEnvValues.get("ph_dateTimeFormat"));
+                let sessionEndTime = addMinutesToDate(loadEnvValues.get("ph_customer_sessionValidationTime"), sessionStartTime);
+                let sessionDetails = SignupDao.prepareParamToPutUserSession(requestDetails.payload.username, requestDetails.payload.isRemembered, sessionStartTime, sessionEndTime)
+                await SignupDao.putDataIntoDb(sessionDetails);
+                sessionDetails = sessionDetails.payload
+                let sessionData = {
+                    sessionId: sessionDetails.sessionId,
+                    sessionEndTime: sessionEndTime
+                }
+                if (requestDetails.payload.isRemembered) {
+                    sessionData.deviceId = sessionDetails.deviceId
+                    sessionData.deviceSecret = sessionDetails.deviceSecret
+                }
+                const responseObj = createLoginResponse(200, sessionData);
+                return responseObj;
             }
-            if (requestDetails.payload.isRemembered) {
-                sessionData.deviceId = sessionDetails.deviceId
-                sessionData.deviceSecret = sessionDetails.deviceSecret
-            }
-            const responseObj = createLoginResponse(200, sessionData);
-            return responseObj;
-
         } else {
             await SignupDao.updateDataIntoDb(SignupDao.prepareParamToUpdateUserOTPVerify(userDetails, phoneCodeVerifyDateTime, loadEnvValues.get("ph_phoneCodeVerifyAllowed")));
             isExceptionExempted = true;
@@ -264,6 +265,17 @@ const verifyPhoneFunction = async (requestDetails) => {
         else
             await handleExceptions(err, requestDetails);
     }
+}
+
+
+const isPhoneCodeExpired = async (lastOTPSentDateTime) => {
+    let timeDiff = calculateTimeDiff(lastOTPSentDateTime);
+    if (timeDiff > loadEnvValues.get("ph_phoneCodeValidTimeLimit")) {
+        return false;
+    } else {
+        return true;
+    }
+
 }
 
 const phoneCodeVerifyAllowedFunction = async (userDetails) => {
@@ -415,13 +427,14 @@ const createLoginResponse = (statusCode, sessionData) => {
 let json = {
     body: {
         "action": "verifyPhone",
-        "payload": {
-            code: 300985,
-            isRemembered: true
+        payload: {
+            code: 369659,
+            isRemembered: false
         }
+
     },
     user_info: {
-        email: "jay.gupta@creditculture.sg"
+        email: "jayguptazzz@gmail.com"
     }
 }
 

@@ -146,13 +146,12 @@ class SignupDao extends Dao {
         return pePut;
     }
 
-    prepareParamsToGetOTP(userName, validTimeLimit, validTimeFormat, globalTimeFormat) {
+    prepareParamsToGetOTP(userName, globalTimeFormat) {
         let peQuery = new ParamExpressionsQuery();
         var dateTime = new Date();
         peQuery.tableName = usersOtpTableSchema.tableName
-        peQuery.keyConditionExpression = 'id = :username AND #phoneVerifyCodeSentDateTime BETWEEN :fromDateTime AND :toDateTime '
+        peQuery.keyConditionExpression = 'id = :username AND #phoneVerifyCodeSentDateTime <  :toDateTime '
         peQuery.expressionAttributeValues = {
-            ':fromDateTime': moment(dateTime).subtract(validTimeLimit, validTimeFormat).format(globalTimeFormat),
             ':toDateTime': moment(dateTime).format(globalTimeFormat),
             ':username': userName,
             ':typeValue': "signup_phone_verify"
